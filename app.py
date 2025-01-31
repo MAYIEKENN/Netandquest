@@ -1,8 +1,8 @@
-from fastapi import FastAPI
+from flask import Flask, jsonify
 import aiohttp
 import asyncio
 
-app = FastAPI()
+app = Flask(__name__)
 
 # URLs
 API_URL = "https://xalyon.x10.mx/data.json"
@@ -51,25 +51,31 @@ async def send_network_test_request(session, number, api_key, operator):
     async with session.post(TEST_URL, json=payload, headers=headers) as response:
         return response.status == 200
 
-@app.get("/start")
-async def start_processing():
+@app.route('/start', methods=['GET'])
+def start_processing():
     """API endpoint to start processing claims and network tests."""
-    async with aiohttp.ClientSession() as session:
-        data = await fetch_json_data(session)
-        if not data:
-            return {"status": "error", "message": "Failed to fetch JSON data."}
+    async def process_requests():
+        async with aiohttp.ClientSession() as session:
+            data = await fetch_json_data(session)
+            if not data:
+                return {"status": "error", "message": "Failed to fetch JSON data."}
 
-        # Create tasks for both claims and network tests
-        claim_tasks = [send_claim_request(session, item["api"], item["number"]) for item in data]
-        network_tasks = [
-            send_network_test_request(session, item["number"], item["api"], operator)
-            for item in data for operator in OPERATORS
-        ]
+            # Create tasks for both claims and network tests
+            claim_tasks = [send_claim_request(session, item["api"], item["number"]) for item in data]
+            network_tasks = [
+                send_network_test_request(session, item["number"], item["api"], operator)
+                for item in data for operator in OPERATORS
+            ]
 
-        results = await asyncio.gather(*claim_tasks, *network_tasks)
+            results = await asyncio.gather(*claim_tasks, *network_tasks)
 
-        # Count success and failure
-        success_count = sum(results)
-        fail_count = len(results) - success_count
+            # Count success and failure
+            success_count = sum(results)
+            fail_count = len(results) - success_count
 
-        return {"status": "success", "success": success_count, "fail": fail_count}
+            return {"status": "success", "success": success_count, "fail": fail_count}
+
+    return asyncio.run(process_requests())
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000)
